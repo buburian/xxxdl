@@ -4,6 +4,7 @@
 這是用來下載一些"影片"
 
 目前只有測試win10 64位元 
+
 其他win7 或是win10 32位元不保證可以使用
 
 點擊 run.bat 跳出 dos視窗之後。在裡面輸入 xxxdl -h 看說明
@@ -23,3 +24,13 @@
     xxxdl -q "http://www.pornhub.com/view_video.php?viewkey=ph5c1d1b3dc9727"
 
 下載成功會在同一個目錄下出現
+
+
+### 支援網站
+||||
+|:------------ | :----------- |:------------|
+| twitter.com  | xvideos.com  |xtube.com    |
+| pornhub.com  | redtube.com  |  tube8.com  |
+| playvids.com | peekvids.com | youtube.com |
+|vimeo.com|||
+
