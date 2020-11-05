@@ -19,16 +19,7 @@ import js2py
 import base64
 
 project_name = "XXX 下載器"
-version = "2.0a"
-
-
-class MyParser(argparse.ArgumentParser):
-    def error(self, message):
-        if message == 'the following arguments are required: video_page_url':
-            message = "缺少 影片連結 參數"
-        sys.stderr.write('錯誤: %s\n' % message)
-        self.print_help()
-        sys.exit(2)
+version = "2.0.2b"
 
 
 class XxxDownloader:
@@ -129,7 +120,7 @@ class XxxDownloader:
         if self.__showlog_flag:
             print("{}\n".format(strings))
 
-    def __connect(self, url=None, headers=None, timeout=3, stream=False):
+    def __connect(self, url=None, headers=None, timeout=8, stream=False):
         try:
             if not url:
                 url = self.__url
@@ -191,8 +182,8 @@ class XxxDownloader:
         for s in self.__support_host:
             if re.compile(r"^https?:\/\/(.*)?{}".format(s['host'][0]), re.IGNORECASE).match(url):
                 return True
-            else:
-                return False
+        else:
+            return False
 
     def claw(self, url):
         self.__url = url.strip()
@@ -552,116 +543,120 @@ class XxxDownloader:
 
 
 if __name__ == '__main__':
+    try:
+        xx = XxxDownloader()
+        support_hosts = ""
+        for i, x in enumerate(xx.get_support_host(), 1):
+            if i % 3 == 0:
+                support_hosts = "{0}{1}".format(support_hosts, x)
+                support_hosts = "{0}\n".format(support_hosts)
+            else:
+                support_hosts = "{0}{1}\t".format(support_hosts, x)
 
-    xx = XxxDownloader()
-    support_hosts = ""
-    for i, x in enumerate(xx.get_support_host(), 1):
-        if i % 3 == 0:
-            support_hosts = "{0}{1}".format(support_hosts, x)
-            support_hosts = "{0}\n".format(support_hosts)
-        else:
-            support_hosts = "{0}{1}\t".format(support_hosts, x)
+        support_hosts = support_hosts[:-1]
+        parser = argparse.ArgumentParser(prog="XXXDL", epilog="目前支援有公開連結的網站，包括\n--------------"
+                        "--------------------\n{0}\n\n\t\t\t\t\t\tW.S.Y"
+                        " 2020 \n（其餘影音平台之後補上）\n".format(support_hosts),
+                        formatter_class=argparse.RawTextHelpFormatter)
 
-    support_hosts = support_hosts[:-1]
-    parser = MyParser(prog="XXXDL", epilog="目前支援有公開連結的網站，包括\n--------------"
-                      "--------------------\n{0}\n\n\t\t\t\t\t\tW.S.Y"
-                      " 2020 \n（其餘影音平台之後補上）\n".format(support_hosts),
-                      formatter_class=argparse.RawTextHelpFormatter)
+        # parser.add_argument('video_page_url', help="影片連結", required=False)
 
-    # parser.add_argument('video_page_url', help="影片連結", required=False)
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('-g', dest='singleUrl', help="單一影片連結")
+        group.add_argument('-a', dest='url',
+                        help='加入連結', default=False)
+        group.add_argument('-c', dest='clearflag',  help='清除列表',
+                        action="store_true", default=False)
+        group.add_argument('-l', dest='listflag', help='顯示列表',
+                        action="store_true", default=False)
+        group.add_argument('-s', dest='startrun', help='開始批次抓取',
+                        action="store_true", default=False)
 
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('-g', dest='singleUrl', help="單一影片連結")
-    group.add_argument('-a', dest='url',
-                       help='加入連結', default=False)
-    group.add_argument('-c', dest='clearflag',  help='清除列表',
-                       action="store_true", default=False)
-    group.add_argument('-l', dest='listflag', help='顯示列表',
-                       action="store_true", default=False)
-    group.add_argument('-s', dest='startrun', help='開始批次抓取',
-                       action="store_true", default=False)
+        parser.add_argument('-q', help='關閉系統訊息', action="store_true")
+        parser.add_argument('-v', help="顯示程式版本", action="store_true")
 
-    parser.add_argument('-q', help='關閉系統訊息', action="store_true")
-    parser.add_argument('-v', help="顯示程式版本", action="store_true")
+        args = parser.parse_args()
 
-    args = parser.parse_args()
+        if args.q:
+            xx.set_quite()
+        if args.v:
+            sys.stderr.write('{0} {1}\n'.format(project_name, version))
+            sys.exit(0)
 
-    if args.q:
-        xx.set_quite()
-    if args.v:
-        sys.stderr.write('{0} {1}\n'.format(project_name, version))
-        sys.exit(0)
+        if not xx.internet_on():
+            sys.stderr.write('錯誤: %s\n' % "網路尚未連線。無法在離線狀況下使用")
+            sys.exit(2)
 
-    if not xx.internet_on():
-        sys.stderr.write('錯誤: %s\n' % "網路尚未連線。無法在離線狀況下使用")
-        sys.exit(2)
+        if not args.singleUrl:
+            if not os.path.exists("db.lst"):
+                Path('db.lst').touch()
 
-    if not args.singleUrl:
-        if not os.path.exists("db.lst"):
-            Path('db.lst').touch()
+            if args.url:
+                if xx.checkifcanClaw(args.url):
+                    with open("db.lst", "r") as f:
+                        data = f.readline()
+                    with open("db.lst", "w") as f:
+                        if data == "":
+                            data = set()
+                        else:
+                            data = set(json.loads(data))
 
-        if args.url:
-            if xx.checkifcanClaw(args.url):
+                        data.add(args.url)
+                        f.write(json.dumps(list(data)))
+                    sys.stderr.write('網址: %s 加入成功\n' % args.url)
+                else:
+                    sys.stderr.write('錯誤: %s\n' % "網址格式有錯")
+
+            elif args.listflag:
                 with open("db.lst", "r") as f:
                     data = f.readline()
-                with open("db.lst", "w") as f:
-                    if data == "":
-                        data = set()
-                    else:
-                        data = set(json.loads(data))
+                if data == "":
+                    data = set()
+                else:
+                    data = set(json.loads(data))
 
-                    data.add(args.url)
-                    f.write(json.dumps(list(data)))
-                sys.stderr.write('網址: %s 加入成功\n' % args.url)
+                sys.stderr.write('目前待抓取網址有:\n')
+                for u in data:
+                    sys.stderr.write('%s\n' % u)
+
+            elif args.clearflag:
+                yn = input("確定清除所有待抓取網址? (Y/n) ")
+                if yn == "Y" or yn == "y" or yn == "Yes" or yn == "yes":
+                    with open("db.lst", "w") as f:
+                        f.write("")
+                    sys.stderr.write('已經清除\n')
+                else:
+                    sys.stderr.write('使用者取消\n')
+
+            elif args.startrun:
+                with open("db.lst", "r") as f:
+                    data = f.readline()
+                if data == "":
+                    data = set()
+                else:
+                    data = set(json.loads(data))
+
+                for u in data.copy():
+                    sys.stderr.write('開始抓取: %s\n' % u)
+                    if not xx.claw(u):
+                        sys.stderr.write('抓取: %s 失敗\n' % u)
+                    data.remove(u)
+                    with open("db.lst", "w") as f:
+                        f.write(json.dumps(list(data)))
+
             else:
-                sys.stderr.write('錯誤: %s\n' % "網址格式有錯")
-
-        elif args.listflag:
-            with open("db.lst", "r") as f:
-                data = f.readline()
-            if data == "":
-                data = set()
-            else:
-                data = set(json.loads(data))
-
-            sys.stderr.write('目前待抓取網址有:\n')
-            for u in data:
-                sys.stderr.write('%s\n' % u)
-
-        elif args.clearflag:
-            yn = input("確定清除所有待抓取網址? (Y/n) ")
-            if yn == "Y" or yn == "y" or yn == "Yes" or yn == "yes":
-                with open("db.lst", "w") as f:
-                    f.write("")
-                sys.stderr.write('已經清除\n')
-            else:
-                sys.stderr.write('使用者取消\n')
-
-        elif args.startrun:
-            with open("db.lst", "r") as f:
-                data = f.readline()
-            if data == "":
-                data = set()
-            else:
-                data = set(json.loads(data))
-
-            for u in data.copy():
-                sys.stderr.write('開始抓取: %s\n' % u)
-                if not xx.claw(u):
-                    sys.stderr.write('抓取: %s 失敗\n' % u)
-                data.remove(u)
-                with open("db.lst", "w") as f:
-                    f.write(json.dumps(list(data)))
-
+                sys.stderr.write(
+                    'usage: XXXDL [-h] [-g SINGLEURL | -a URL | -c | -l | -s] [-q] [-v]\n')
         else:
-            sys.stderr.write(
-                'usage: XXXDL [-h] [-g SINGLEURL | -a URL | -c | -l | -s] [-q] [-v]\n')
-    else:
-        # 直接抓取
-        if not all([urlparse(args.singleUrl).scheme, urlparse(args.singleUrl).netloc,
-                    urlparse(args.singleUrl).path]):
-            sys.stderr.write('錯誤: %s\n' % "網址格式有錯")
-            sys.exit(2)
+            # 直接抓取
+            if not all([urlparse(args.singleUrl).scheme, urlparse(args.singleUrl).netloc,
+                        urlparse(args.singleUrl).path]):
+                sys.stderr.write('錯誤: %s\n' % "網址格式有錯")
+                sys.exit(2)
 
-        if not xx.claw(args.singleUrl):
-            sys.exit(2)
+            if not xx.claw(args.singleUrl):
+                sys.exit(2)
+
+    except KeyboardInterrupt:
+        sys.stderr.write('錯誤: %s\n' % "使用者強制中斷")
+        sys.exit(2)    
