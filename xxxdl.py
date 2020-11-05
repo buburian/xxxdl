@@ -1,4 +1,4 @@
-# 先拿掉youtube, 其他候補
+# 先拿掉youtube
 
 import re
 import requests
@@ -34,7 +34,7 @@ class MyParser(argparse.ArgumentParser):
 class XxxDownloader:
     def __init__(self):
         self.__support_host = [
-            # {'host': ['twitter.com'], 'func': lambda: self.__do_twitter()},
+            {'host': ['twitter.com'], 'func': lambda: self.__do_twitter()},
             {'host': ['xvideos.com'],
                 'func': lambda: self.__do_xtubetype('xvideos')},
             {'host': ['xtube.com'], 'func': lambda: self.__do_xtubetype(
@@ -45,10 +45,11 @@ class XxxDownloader:
                 'redtube')},
             {'host': ['tube8.com'],
                 'func': lambda: self.__do_xtubetype('tube8')},
-            # {'host': ['playvids.com'], 'func': lambda: self.__do_vidstype()},
-            # {'host': ['peekvids.com'], 'func': lambda: self.__do_vidstype()},
+            {'host': ['playvids.com'], 'func': lambda: self.__do_vidstype()},
+            {'host': ['peekvids.com'], 'func': lambda: self.__do_vidstype()},
             # {'host': ['youtube.com'],'func': lambda: self.__do_youtube()},  # 2020 fixed
-            # {'host': ['vimeo.com', 'player.vimeo.com'],'func': lambda: self.__do_vimeo()}
+            {'host': ['vimeo.com', 'player.vimeo.com'],
+                'func': lambda: self.__do_vimeo()}
         ]
 
         self.__urlcheck_pattern = re.compile(
@@ -298,8 +299,243 @@ class XxxDownloader:
         file_save_to = "{0}.{1}".format(video_title, file_ext)  # 現在檔名都是影片標題
         return self.__download_from_url(mp4_url, file_save_to)  # 檔名用標頭
 
+    def __do_vidstype(self):
+        req = self.__connect()
+        req_text = str(req.text)
+        self.log("開始分析影片")
+        lg = html.fromstring(req_text)
 
-    
+        regular_express = lg.xpath(
+            "//div[@class='info-video']/h1/text()|//h1[@class='title-video']/text()")
+
+        if len(regular_express) == 0 or regular_express[0] == "":
+            self.log("影片標題抓取有誤，請聯絡程式作者")
+            return False
+
+        video_title = regular_express[0].strip()
+        self.log("影片標題是 {0}".format(video_title))
+
+        regular_express = lg.xpath(
+            "//video[@id='mediaPlayer']")
+
+        src360 = regular_express[0].xpath('@data-hls-src360')
+        src480 = regular_express[0].xpath('@data-hls-src480')
+        src720 = regular_express[0].xpath('@data-hls-src720')
+        src1080 = regular_express[0].xpath('@data-hls-src1080')
+
+        if len(src1080) > 0:
+            m3u8Url = src1080[0].strip()
+        elif len(src720) > 0:
+            m3u8Url = src720[0].strip()
+        elif len(src480) > 0:
+            m3u8Url = src480[0].strip()
+        elif len(src360) > 0:
+            m3u8Url = src360[0].strip()
+        else:
+            self.log("影片抓取有誤，請聯絡程式作者")
+            return False
+
+        ts_m3u8_response = self.__connect(url=m3u8Url)
+        ts_m3u8_parse = m3u8.loads(ts_m3u8_response.text)
+        ts_list = []
+
+        tweet_dir = Path("./playvids_tmp")
+
+        resolution_dir = Path(tweet_dir)
+
+        Path.mkdir(resolution_dir, parents=True, exist_ok=True)
+        pbar = tqdm(desc="[{0}] ".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                    total=len(ts_m3u8_parse.segments.uri), initial=0, unit='區塊', unit_scale=False, ascii=True,
+                    postfix="下載成 {0}.ts".format(video_title), ncols=80,
+                    bar_format='{desc} {percentage:3.0f}% [ETA {remaining}] {postfix}')
+
+        for ts_uri in ts_m3u8_parse.segments.uri:
+            ts_file = requests.session().get(ts_uri)
+            fname = ts_uri.split('/')[-1]
+            ts_path = resolution_dir / Path(fname)
+            ts_list.append(ts_path)
+            ts_path.write_bytes(ts_file.content)
+            pbar.update(1)
+
+        pbar.close()
+        ts_full_file = Path(resolution_dir) / Path(video_title + '.ts')
+
+        # Shamelessly taken from https://stackoverflow.com/questions/13613336/python-concatenate-text-files/27077437#27077437
+        with open(str(ts_full_file), 'wb') as wfd:
+            for f in ts_list:
+                with open(f, 'rb') as fd:
+                    shutil.copyfileobj(fd, wfd, 1024 * 1024 * 10)
+                os.remove(f)
+        if Path("./" + os.path.basename(str(ts_full_file))).exists():
+            os.remove("./" + os.path.basename(str(ts_full_file)))
+        if ts_full_file.exists():
+            os.rename(ts_full_file, "./" + os.path.basename(str(ts_full_file)))
+            try:
+                shutil.rmtree("./playvids_tmp")
+            except:
+                pass
+
+        return True
+
+    def __do_twitter(self):
+        '''
+            twitter下載參考了 https://github.com/h4ckninja/twitter-video-downloader
+        '''
+        self.log("twitter驗證較為複雜。請耐心等候")
+        video_player_url_prefix = 'https://twitter.com/i/videos/tweet/'
+        tweet_id = urlparse(self.__url).path.split("/")[-1]
+        tweet_dir = Path("./twitter_tmp")
+        video_player_url = video_player_url_prefix + tweet_id
+        video_player_response = self.__connect(url=video_player_url)
+
+        # Get the JS file with the Bearer token to talk to the API.
+        # Twitter really changed things up.
+        js_file_url = re.search(
+            r'<script src="([^<>]*)"></script>', video_player_response.text).group(1)
+        js_file_response = self.__connect(url=js_file_url)
+
+        # Pull the bearer token out
+        bearer_token_pattern = re.compile('Bearer ([a-zA-Z0-9%-])+')
+        bearer_token = bearer_token_pattern.search(js_file_response.text)
+        bearer_token = bearer_token.group(0)
+
+        newheaders = self.__header.copy()
+        newheaders['Authorization'] = bearer_token
+
+        res = self.__session.post(
+            "https://api.twitter.com/1.1/guest/activate.json", headers=newheaders, timeout=10, stream=False)
+        res_json = json.loads(res.text)
+        newheaders['x-guest-token'] = res_json.get('guest_token')
+
+        player_config = self.__connect(url='https://api.twitter.com/1.1/videos/tweet/config/' + tweet_id + '.json',
+                                       headers=newheaders, timeout=10)
+
+        if player_config.text == "":
+            self.log("沒有權限讀取，不可以抓取非公開的影片")
+            return False
+
+        m3u8_url_get = json.loads(player_config.text)
+        m3u8_url_get = m3u8_url_get['track']['playbackUrl']
+
+        # Get m3u8
+        m3u8_response = self.__connect(
+            url=m3u8_url_get, headers=newheaders, timeout=10)
+        m3u8_url_parse = urlparse(m3u8_url_get)
+        video_host = m3u8_url_parse.scheme + '://' + m3u8_url_parse.hostname
+        m3u8_parse = m3u8.loads(m3u8_response.text)
+
+        maxbandwith = 0
+        playlistID = 0
+        for playlist in m3u8_parse.playlists:
+            if playlist.stream_info.bandwidth > maxbandwith:
+                maxbandwith = playlist.stream_info.bandwidth
+                maxbandwithIndex = playlistID
+            playlistID += 1
+        playlist = m3u8_parse.playlists[maxbandwithIndex]
+
+        resolution = str(
+            playlist.stream_info.resolution[0]) + 'x' + str(playlist.stream_info.resolution[1])
+        resolution_dir = Path(tweet_dir) / Path(resolution)
+        Path.mkdir(resolution_dir, parents=True, exist_ok=True)
+        playlist_url = video_host + playlist.uri
+
+        ts_m3u8_response = requests.session().get(playlist_url)
+        ts_m3u8_parse = m3u8.loads(ts_m3u8_response.text)
+
+        ts_list = []
+
+        if self.__showlog_flag:
+            pbar = tqdm(desc="[{0}] ".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                        total=len(ts_m3u8_parse.segments.uri), initial=0, unit='區塊', unit_scale=False, ascii=True,
+                        postfix="下載成 {0}.ts".format(tweet_id), ncols=80,
+                        bar_format='{desc} {percentage:3.0f}% [ETA {remaining}] {postfix}')
+
+        for ts_uri in ts_m3u8_parse.segments.uri:
+            # print('[+] Downloading ' + resolution)
+            ts_file = requests.session().get(video_host + ts_uri)
+            fname = ts_uri.split('/')[-1]
+            ts_path = resolution_dir / Path(fname)
+            ts_list.append(ts_path)
+            ts_path.write_bytes(ts_file.content)
+            if self.__showlog_flag:
+                pbar.update(1)
+
+        if self.__showlog_flag:
+            pbar.close()
+        ts_full_file = Path(resolution_dir) / Path(tweet_id + '.ts')
+
+        # Shamelessly taken from https://stackoverflow.com/questions/13613336/python-concatenate-text-files/27077437#27077437
+        with open(str(ts_full_file), 'wb') as wfd:
+            for f in ts_list:
+                with open(f, 'rb') as fd:
+                    shutil.copyfileobj(fd, wfd, 1024 * 1024 * 10)
+                os.remove(f)
+        if Path("./" + os.path.basename(str(ts_full_file))).exists():
+            os.remove("./" + os.path.basename(str(ts_full_file)))
+        if ts_full_file.exists():
+            os.rename(ts_full_file, "./" + os.path.basename(str(ts_full_file)))
+            try:
+                shutil.rmtree("./twitter_tmp")
+            except:
+                pass
+
+        return True
+
+    def __do_vimeo(self):
+        self.log("開始分析影片")
+        vimeo_id = self.__url.split("/")[-1]
+        if vimeo_id == "":
+            vimeo_id = self.__url.split("/")[-2]
+        try:
+            vimeo_id = int(vimeo_id)
+        except ValueError:
+            self.log("id編號錯誤。請輸入正確vimeo影片網址")
+            return False
+        # ------
+        req = self.__session.get(
+            'https://www.vimeo.com/{0}/'.format(vimeo_id), headers=self.__header, timeout=10)
+        is_private = re.search(
+            r'class="exception_title--password iris_header">([^"]*)<\/h1>', req.text)
+
+        if is_private and is_private.group(1) == 'This video is private':
+            # 需要密碼
+            password = input("請輸入密碼: ")
+            b64passwd = base64.b64encode(
+                password.encode("utf8")).decode("utf8")
+            payload = {'password': b64passwd, 'Watch Video': ''}
+            r = self.__session.post('https://player.vimeo.com/video/{0}/check-password?referrer=null'
+                                    .format(vimeo_id), headers=self.__header, data=payload)
+            config = json.loads(r.text)
+            if not config:
+                self.log("密碼錯誤")
+                return False
+        else:
+            # 不需要密碼
+            req = self.__session.get(
+                'https://player.vimeo.com/video/{0}/'.format(vimeo_id), headers=self.__header)
+            configObj = re.search(
+                r'var(?:\s)config(?:\s)?=([^;]*);', req.text)
+
+            if configObj:
+                try:
+                    config = json.loads(configObj.group(1))
+                except:
+                    self.log("It may not be a video page")
+                    return False
+            else:
+                self.log('It may not be a video page')
+                return False
+        # 取最高畫質
+        config['request']['files']['progressive'].sort(
+            key=lambda k: int(k['quality'][0:-1]), reverse=True)
+        mp4_url = config['request']['files']['progressive'][0]['url']
+        video_title = config['video']['title']
+        self.log("影片真實路徑可能是 {0}".format(mp4_url))
+        self.log("影片標題是 {0}".format(video_title))
+        file_ext = "mp4"
+        file_save_to = "{0}.{1}".format(video_title, file_ext)  # 現在檔名都是影片標題
+        return self.__download_from_url(mp4_url, file_save_to)  # 檔名用標頭
+
     def __exeJs(self, js):
         flashvars = re.findall(r"flashvars_\d+", js)[0]
         js = "\n".join(js.split("\n\t")[:-5]).strip()
@@ -354,7 +590,7 @@ if __name__ == '__main__':
         xx.set_quite()
     if args.v:
         sys.stderr.write('{0} {1}\n'.format(project_name, version))
-        exit(0)
+        sys.exit(0)
 
     if not xx.internet_on():
         sys.stderr.write('錯誤: %s\n' % "網路尚未連線。無法在離線狀況下使用")
