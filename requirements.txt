@@ -4,7 +4,7 @@ chardet==3.0.4
 idna==2.10
 iso8601==0.1.13
 Js2Py==0.70
-lxml==4.6.1
+lxml==4.6.3
 m3u8==0.7.1
 macholib==1.14
 pyjsparser==2.7.1
